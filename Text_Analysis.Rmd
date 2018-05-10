@@ -1,0 +1,473 @@
+---
+title: "Analyzing Text Data and Manipulating Strings"
+output: html_document
+urlcolor: blue
+---
+
+========================================================
+
+## Name: Rajnish Yadav
+
+```{r setup, include=FALSE}
+#DON'T MODIFY THIS CHUNK!
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE, tidy.opts=list(width.cutoff=50))
+```
+
+```{r}
+#Put all necessary libraries here
+library(gutenbergr)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(tidytext)
+library(wordcloud)
+library(viridisLite)
+library(tidyr)
+```
+
+Load the `babynames` dataset, which contains yearly information on the frequency of baby names by sex and is provided by the US Social Security Administration.  It includes all names with at least 5 uses per year per sex. Let's practice pattern matching!
+
+```{r}
+library(babynames)
+data("babynames")
+?babynames
+```
+
+1.a For 2000, find the ten most popular female baby names that start with the letter Z.
+
+```{r, tidy = FALSE}
+bn_a <- babynames %>%
+  select(year, sex, name, n) %>%
+  filter(year == 2000 & sex == "F") %>%
+  filter(str_detect(string = name, pattern = "^Z")) %>%
+  arrange(desc(n)) %>%
+  top_n(10)
+
+bn_a
+```
+
+
+
+1.b For 2000, find the ten most popular female baby names that contain the letter z.  
+
+```{r, tidy = FALSE}
+bn_b <- babynames %>%
+  select(year, sex, name, n) %>%
+  filter(year == 2000 & sex == "F") %>%
+  filter(str_detect(string = name, pattern = "z|Z")) %>%
+  arrange(desc(n)) %>%
+  top_n(10)
+
+bn_b
+```
+
+
+1.c For 2000, find the ten most popular female baby names that end in the letter z. 
+```{r, tidy = FALSE}
+bn_c <- babynames %>%
+  select(year, name, n) %>%
+  filter(year == 2000) %>%
+  filter(str_detect(string = name, pattern = "z$")) %>%
+  arrange(desc(n)) %>%
+  top_n(10)
+
+bn_c
+```
+
+
+1.d Between your three tables in 1.a - 1.c, do any of the names show up on more than one list?  If so, which ones?
+
+```{r, tidy = FALSE}
+inner_join(bn_a, bn_b, by = "name")
+
+inner_join(bn_a, bn_c, by = "name")
+
+inner_join(bn_b, bn_c, by = "name")
+```
+
+
+*********************************************************************************
+
+The name 'Zoe' shows up in table 1.a and table 1.b
+
+*********************************************************************************
+
+1.e  Verify that none of the baby names contain a numeric (0-9) in them.
+
+```{r, tidy = FALSE}
+bn_e <- babynames %>%
+  select(name) %>%
+  filter(str_detect(string = name, pattern = "[0-9]"))
+
+bn_e
+```
+*********************************************************************************
+
+We get 0 rows in the 'name' column, where the name contains a numeric. Thus, we veried that none of the baby names contain a numeric in them.
+
+*********************************************************************************
+
+1.f While none of the names contain 0-9, that doesn't mean they don't contain "one", "two", ..., or "nine".  Create a table that provides the number of times a baby's name contained the word "zero", the word "one", ... the word "nine". 
+
+```{r, tidy = FALSE}
+# we first create a vector of numbers, and then turn it into a single regular expression
+numbers <- c("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+numbers_match <- str_c(numbers, collapse = "|")
+babynames$name <- str_to_lower(babynames$name)
+
+#select the names that contain a number, and then extract the number to figure out which one it is
+has_number <- str_subset(babynames$name, numbers_match)
+matches <- str_extract(has_number, numbers_match)
+
+
+bn_f <- babynames %>%
+  select(name, n) %>%
+  filter(str_detect(string = name, pattern = numbers_match)) %>%
+  mutate(number = str_extract(string = name, pattern = numbers_match)) %>%
+  group_by(number) %>%
+  summarise(count = sum(n)) %>%
+  arrange(desc(count))
+  
+bn_f
+```
+
+1.g  Which written number or numbers don't show up in any of the baby names?
+
+*********************************************************************************
+
+'five' don't show up in any of the baby names. 
+
+*********************************************************************************
+
+1.h Create a table that contains the names and their frequencies for the two least common written numbers.
+
+```{r, tidy = FALSE}
+least_common_num <- c("zero", "four")
+numbers_match2 <- str_c(least_common_num, collapse = "|")
+babynames$name <- str_to_lower(babynames$name)
+
+bn_h <- babynames %>%
+  select(name, n) %>%
+  rename(names = name, frequency = n) %>%
+  mutate(written_num = str_extract(string = names, pattern = numbers_match2)) %>%
+  filter(str_detect(string = names, pattern = numbers_match2))
+
+bn_h
+```
+
+
+1.i List out the names that contain no vowels (consider "y" to be a vowel).  
+
+```{r, tidy = FALSE}
+bn_i <- babynames %>%
+  select(name) %>%
+  filter(str_detect(string = name, pattern = "^[^aeiouyAEIOUY]+$")) %>%
+  distinct(name)
+
+bn_i$name
+```
+
+
+
+2. Let's do some text analysis on the wonderful book "Call of the Wild" (https://en.wikipedia.org/wiki/The_Call_of_the_Wild) by Jack London!  The following code will pull the book into R using the `gutenbergr` package. 
+
+```{r}
+library(gutenbergr)
+wild <- gutenberg_download(215)
+```
+
+2.a. Let's create a tidy text dataset where we tokenize by words.
+
+```{r, tidy = FALSE}
+wild_tidy <- wild %>%
+  unnest_tokens(output = word, input = text, token = "words")
+
+wild_tidy
+```
+
+
+2.b Let's find the frequency of the 20 most common words.  First, remove stop words and remove "s" or "'s" from the end of words.
+
+```{r, tidy = FALSE}
+wild_tidy_b <- wild_tidy %>%
+  anti_join(stop_words, by = "word") %>%
+  mutate(word = str_replace_all(word,"'s", "")) %>%
+  mutate(word = str_replace_all(word,"s$", "")) %>%
+  count(word, sort = TRUE) %>%
+  top_n(20)
+  
+wild_tidy_b
+```
+
+
+2.c Let's create a bar graph and a word cloud of the frequencies of the 20 most common words.
+
+```{r, tidy = FALSE}
+
+wild_tidy_c1 <- wild_tidy_b %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(fill = "darkorange1",stat = "identity", alpha = 0.7) +
+  xlab(NULL) +
+  coord_flip()
+
+wild_tidy_c1
+
+wild_tidy_c2 <- wild_tidy_b %>%
+  with(wordcloud(word, n, max.words = 20, colors = plasma(n = 20, direction = -1)))
+```
+
+2.d Let's explore the sentiment of the text using the three sentiment lexicons in `tidytext`. We will NOT remove stop words this time.  
+
+```{r, tidy = FALSE}
+wild_tidy_sentiment_afinn <- wild_tidy %>%
+  count(word, sort = TRUE) %>%
+  inner_join(get_sentiments("afinn")) %>%
+  mutate(contribution = n * score) %>%
+  arrange(desc(contribution))
+wild_tidy_sentiment_afinn
+  
+wild_tidy_sentiment_bing <- wild_tidy %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment) %>% 
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n))
+
+ggplot(wild_tidy_sentiment_bing, aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free") +  
+  coord_flip()
+
+wild_tidy_sentiment_nrc <- wild_tidy %>%
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  group_by(sentiment) %>%
+  summarise(n = sum(n)) %>%
+  mutate(prop = n / sum(n))
+
+ggplot(wild_tidy_sentiment_nrc, mapping = aes(x = sentiment, y = prop)) + 
+ geom_bar(fill = "darkorange1",stat = "identity", alpha = 0.7) 
+
+
+
+```
+
+*********************************************************************************
+
+The sentiment analysis of the text above seems to suggest that the overall sentiment of the text is net negative. Positive words like 'great', 'like', 'good', 'love' had the biggest impact using the 'afinn' lexicon, whereas negative words like 'no', 'dead', 'fire' had the biggest impact in the sentiment. Moreover, using the 'bing' lexicon we can see from the plot that words like 'like', 'great', 'good', 'work' had the biggest positive influence compared to words like 'wild', 'fell', 'dead', 'hard' which had the biggest negative influence. Similarly, from the 'nrc' plot, we can see that the proportions of anger, disgust, fear, negative and sadness sentiment are much higher in the book. To be precise, one fifth of the book has negative sentiment and about one-seventh of the book has negative sentiment.
+
+*********************************************************************************
+
+2.e Let's compute the average sentiment score of the text using `afinn`. 
+
+```{r, tidy = FALSE}
+wild_tidy_sentiment_afinn %>%
+  summarise(mean = sum(n*score) / sum(n))
+```
+
+*********************************************************************************
+
+Average sentiment score of the text is -0.3222465. 'great', 'like', 'good', 'love', 'strength', best' had the most positive influence. 'no', 'dead', 'fire', 'cried', 'lost', 'fear' had the most negative influence. 
+
+*********************************************************************************
+
+2.f We found that "no" was an important negative word in the sentiment score.  To know if that really makes sense, let's turn to the raw lines of text for context.  Let's pull out all of the lines that have the word "no" in them.  We will make sure to not pull out extraneous lines (e.g., a line with the word "now").  
+
+```{r, tidy = FALSE}
+wild_tidy2 <- wild %>%
+  unnest_tokens(output = line, input = text, token = "lines") 
+
+wild_tidy3 <- wild_tidy2 %>%
+  filter(str_detect(string = wild_tidy2$line, pattern = "\\bno\\b"))
+wild_tidy3
+
+```
+
+2.g
+*********************************************************************************
+
+The word 'no' is used before nouns a fair number of times in the text -- no wolf, no loser, no chance, affection etc. Simiarly, it's used right before matter [no matter how night ... no matter how breathless the air and so on]. London uses 'no' generously to express negations and comparisons. He has definitely used 'no' numerous times in the book but to be certain about its influence in his writing style, we should further do tf-idf analysis which will tell us if it is an important word within a collection of his books or he has only used it in this book extensively because of the descriptive nature of text. 
+
+*********************************************************************************
+
+2.h We can also look at how the sentiment of the text changes as the text progresses. 
+    
+```{r, tidy = FALSE}
+wild_time <- wild %>%
+  mutate(line = row_number(), index = floor(line/40) + 1) %>%
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  inner_join(get_sentiments("bing")) %>%
+  group_by(index) %>%
+  count(sentiment) %>%
+  spread(sentiment, n) %>% 
+  mutate(sentiment = positive - negative)
+
+wild_time
+```
+
+2.i Let's create a plot of the sentiment scores as the text progresses.
+
+```{r, tidy = FALSE}
+ggplot(wild_time, aes(index, sentiment)) +
+  geom_col(fill = "darkorange1", alpha = 0.7) 
+  
+```
+
+
+2.j The choice of 45 lines per chunk was pretty arbitrary.  Let's try modifying the index value a few times and recreating the plot in 2.i.  Based on our plots, what can we conclude about the sentiment of the novel as it progresses?
+
+```{r, tidy = FALSE}
+wild_time1 <- wild %>%
+  mutate(line = row_number(), index = floor(line/10) + 1) %>%
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  inner_join(get_sentiments("bing")) %>%
+  group_by(index) %>%
+  count(sentiment) %>%
+  spread(sentiment, n) %>% 
+  mutate(sentiment = positive - negative)
+
+ggplot(wild_time1, aes(index, sentiment)) +
+  geom_col(fill = "darkorange1", alpha = 0.7) 
+
+wild_time2 <- wild %>%
+  mutate(line = row_number(), index = floor(line/80) + 1) %>%
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  inner_join(get_sentiments("bing")) %>%
+  group_by(index) %>%
+  count(sentiment) %>%
+  spread(sentiment, n) %>% 
+  mutate(sentiment = positive - negative)
+
+ggplot(wild_time2, aes(index, sentiment)) +
+  geom_col(fill = "darkorange1", alpha = 0.7) 
+
+wild_time3 <- wild %>%
+  mutate(line = row_number(), index = floor(line/200) + 1) %>%
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  inner_join(get_sentiments("bing")) %>%
+  group_by(index) %>%
+  count(sentiment) %>%
+  spread(sentiment, n) %>% 
+  mutate(sentiment = positive - negative)
+
+ggplot(wild_time3, aes(index, sentiment)) +
+  geom_col(fill = "darkorange1", alpha = 0.7) 
+
+wild_time4 <- wild %>%
+  mutate(line = row_number(), index = floor(line/350) + 1) %>%
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  inner_join(get_sentiments("bing")) %>%
+  group_by(index) %>%
+  count(sentiment) %>%
+  spread(sentiment, n) %>% 
+  mutate(sentiment = positive - negative)
+
+ggplot(wild_time4, aes(index, sentiment)) +
+  geom_col(fill = "darkorange1", alpha = 0.7) 
+
+
+```
+
+*********************************************************************************
+
+Based on the plots above, we can conclude that the net sentiment of the novel is negative as the text progresses. However, we also notice that the net sentiment gets less negative towards the end (in the last quarter) compared to the middle half. 
+
+*********************************************************************************
+
+2.k Let's look at the bigrams (2 consecutive words).  Tokenize the text by bigrams.
+
+```{r, tidy = FALSE}
+wild_bigrams <- wild %>%
+  unnest_tokens(output = bigram, input = text, token = "ngrams", n = 2)
+wild_bigrams
+
+```
+
+
+2.l  Let's produce a sorted table that counts the frequency of each bigram and notice that stop words are still an issue.
+```{r, tidy = FALSE}
+wild_bigrams_sort <- wild_bigrams %>%
+ count(bigram, sort = TRUE)
+wild_bigrams_sort
+```
+
+
+2.m  Let's put each of the bigram words in its own column and then remove any row where either the first word or the second word is a stop word.
+```{r, tidy = FALSE}
+bigrams_separated <- wild_bigrams_sort %>%
+  select(bigram) %>%
+  separate(bigram, c("word1", "word2"), sept = "") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word)
+bigrams_separated
+```
+
+2.n Let's produce a sorted table that counts the frequency of each bigram. 
+
+```{r, tidy = FALSE}
+each_bigram_count <- bigrams_separated %>%
+  count(word1, word2, sort = TRUE)
+each_bigram_count
+```
+
+
+3.  Let's pick 4 of the texts from `gutenbergr`.
+
+```{r, tidy = FALSE}
+# four works by Charles Dickens
+works <- gutenberg_download(c(98, 766, 1400, 786), meta_fields = "title")
+tidy_works <- works %>%
+  mutate(title = factor(title)) %>%
+  group_by(title) %>%
+  unnest_tokens(word, text) 
+
+dickens_sentiment <- tidy_works %>%
+  inner_join(get_sentiments("bing")) %>%
+  mutate(line = row_number(), index = floor(line/75) + 1) %>%
+  count(title, index , sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+ggplot(dickens_sentiment, aes(index, sentiment, fill = title)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~title, ncol = 2, scales = "free_x")
+```
+```{r, tidy = FALSE}
+# term frequency in Charles Dickens above mentioned books
+tidy_words <- tidy_works %>%
+  count(title, word, sort = TRUE) %>%
+  ungroup()
+
+total_words <- tidy_words %>%
+  group_by(title) %>%
+  summarise(total = sum(n))
+
+tidy_words <- left_join(tidy_words, total_words)
+tidy_words <- tidy_words %>%
+  bind_tf_idf(word, title, n) %>%
+  arrange(desc(tf_idf))
+
+tidy_words %>%
+  mutate(word = factor(word, levels = rev(unique(tidy_words$word)))) %>%
+  group_by(title) %>%
+  top_n(15, tf_idf) %>%
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill = title)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~title, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
+*********************************************************************************
+
+
+**Solution**: 
+From the first graphic, we can see how the plot of each book changes toward more positive or negative sentiment over the trajectory of the story. Notice that 'David Copperfield' has the most positive net sentiment among the Dickens' books we analyzed above. 'A tale of two cities' has net negative sentiment in the first quarter of the book, similar to 'Hard Times'; however, after the first quarter until the middle part of the book, it has positive net sentiment for the most part, and so does 'Hard times'. Similarly, 'A tale of two cities' and 'Hard times' have net negative sentiment in the second half of the books. Except for 'David Cooperfield' among the books, we find Dickens to be pretty consistent with sentiment flow throughout the text -- net negative in the first quarter, net positive in the middle part, and net negative in the last half or so. 
+
+In the second graphic, the idea of tf-idf is to find the important words for the content of each books by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in a collection of books, in this case, the group of Charles Dickens' novels as a whole. Calculating tf-idf attempts to find the words that are important (i.e., common) in a text, but not too common. Notice that idf and thus tf-idf are zero for these extremely common words. These are all words that appear in all four of Charles Dickens' novels, so the idf term (which will then be the natural log of 1) is zero. The inverse document frequency (tf-idf) is very low (near zero) for words that occur in many of the books in a collection; this is how this approach decreases the weight for common words. The inverse document frequency will be a higher number for words that occur in fewer of the books in the collection. Proper nouns in the above graphic, as measured by tf-idf, are the most important to each novel and most readers would likely agree. What measuring tf-idf has done here is show us that Charles Dickens used similar language across his four novels, and what distinguishes one novel from the rest within the collection of his works are the proper nouns, the names of people and places. This is the point of tf-idf; it identifies words that are important to one document within a collection of documents.
+
+*********************************************************************************
+
